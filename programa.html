@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>programa — transparent image effects</title>
+<meta name="description" content="Explode or petpet any image as a transparent animated GIF, entirely in the browser.">
+<style>
+  :root{ --bg:#12100f; --panel:#1d1a18; --fg:#f2e9e1; --accent:#ff7a3d; --shadow:#00000066; }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font:15px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;padding:2rem 1rem}
+  #frame{max-width:700px;margin:0 auto;background:var(--panel);border:2px solid #000;
+         border-radius:6px;padding:1.25rem;box-shadow:var(--shadow) .6rem .6rem}
+  h1{font-size:1.15rem;margin:0 0 .25rem}
+  .sub{opacity:.65;font-size:.8rem;margin:0 0 1.1rem}
+  .sub a{color:var(--accent)}
+  label{display:block;margin:.85rem 0 .3rem;font-size:.75rem;text-transform:uppercase;
+        letter-spacing:.08em;opacity:.8}
+  select,input[type=number],input[type=url]{width:100%;background:#0e0c0b;color:var(--fg);
+        border:1px solid #3a3330;border-radius:4px;padding:.45rem;font:inherit}
+  .row{display:flex;gap:.75rem;flex-wrap:wrap}
+  .row>div{flex:1 1 150px}
+  .btn{display:inline-block;background:var(--accent);color:#150f0b;font-weight:700;
+       padding:.5rem 1rem;border-radius:4px;cursor:pointer;border:2px solid #000;font-size:.9rem}
+  input[type=file]{display:none}
+  .checks{display:flex;gap:1rem;align-items:center;margin-top:.9rem;font-size:.85rem;flex-wrap:wrap}
+  #status{margin-top:1rem;min-height:1.4em;font-size:.82rem;color:var(--accent);white-space:pre-line}
+  #log{max-height:7rem;overflow:auto;font-size:.72rem;opacity:.55;margin-top:.4rem;white-space:pre-line}
+  #result{display:none;margin-top:1rem}
+  #output{display:block;max-width:100%;border:1px solid #3a3330;border-radius:4px;
+          background-color:#e9e9e9;
+          background-image:linear-gradient(45deg,#cfcfcf 25%,transparent 25%,transparent 75%,#cfcfcf 75%),
+                           linear-gradient(45deg,#cfcfcf 25%,transparent 25%,transparent 75%,#cfcfcf 75%);
+          background-size:16px 16px;background-position:0 0,8px 8px}
+  #meta{margin-top:.6rem;font-size:.8rem;opacity:.85}
+  a.dl{display:inline-block;margin-top:.6rem;background:#3ecf8e;color:#06231a;font-weight:700;
+       padding:.45rem .9rem;border-radius:4px;text-decoration:none}
+  footer{margin-top:1.25rem;font-size:.72rem;opacity:.5;text-align:center}
+  footer a{color:inherit}
+  #params:empty{display:none}
+  /* raw mode: only the image, no chrome */
+  body.raw{background:transparent;padding:0;display:flex;align-items:center;justify-content:center;min-height:100vh}
+  body.raw #frame{background:none;border:none;box-shadow:none;padding:0;max-width:none}
+  body.raw .chrome,body.raw footer{display:none}
+  body.raw #output{border:none;background:none;border-radius:0}
+</style>
+</head>
+<body>
+<div id="frame">
+  <h1 class="chrome">💥 programa — transparent image effects</h1>
+  <p class="sub chrome">
+    Pick an image and an effect. Everything runs in your browser: the canvas is transparent,
+    so your PNG keeps its alpha, and the GIF is compressed until it fits the size budget.
+    Effects are modular — see <code>modules/README.md</code> to add your own.
+  </p>
+
+  <div class="chrome">
+    <label for="upload">your image (transparent PNG, square works best)</label>
+    <label class="btn" for="upload">browse...</label>
+    <input type="file" id="upload" accept="image/*">
+  </div>
+
+  <div class="chrome" style="margin-top:1rem">
+    <label for="url">...or an image URL</label>
+    <div class="row">
+      <div style="flex:3 1 260px"><input type="url" id="url" placeholder="https://example.com/image.png"></div>
+      <div style="flex:0 0 auto;display:flex;align-items:flex-end">
+        <span class="btn" id="urlGo" style="cursor:pointer">load URL</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="row chrome">
+    <div>
+      <label for="module">module</label>
+      <select id="module"></select>
+    </div>
+    <div>
+      <label for="fx">effect</label>
+      <select id="fx"></select>
+    </div>
+    <div>
+      <label for="maxkb">max size (KB)</label>
+      <input type="number" id="maxkb" value="250" min="20" max="5000" step="10">
+    </div>
+    <div>
+      <label for="prefer">prioritise</label>
+      <select id="prefer">
+        <option value="balanced" selected>balanced</option>
+        <option value="smooth">smooth motion</option>
+        <option value="sharp">resolution</option>
+      </select>
+    </div>
+  </div>
+
+  <div id="params" class="row chrome"></div>
+
+  <div class="checks chrome">
+    <span><input type="checkbox" id="gifsicle"> optimise with gifsicle (-O3 --lossy): smaller or sharper, +341 KB download</span>
+    <span><input type="checkbox" id="proxy"> use a CORS proxy if the host blocks direct loading</span>
+  </div>
+
+  <div id="status"></div>
+  <div id="log" class="chrome"></div>
+
+  <div id="result">
+    <img id="output" alt="result">
+    <div id="meta" class="chrome"></div>
+    <a class="dl chrome" id="dl" download="programa.gif">download GIF</a>
+  </div>
+</div>
+
+<footer class="chrome">
+  explode() from fx.js © Chesapeake (moth.monster), MIT-0 · petpet sprite ©
+  <a href="https://benisland.neocities.org/petpet/">benisland</a> ·
+  GIF encoding by <a href="https://github.com/mattdesl/gifenc">gifenc</a> (MIT)
+</footer>
+
+<script type="module">
+import { fitToBudget, toBlob, toDataURL, loadImage } from './core/encoder.js';
+import { REGISTRY, loadModule, resolveFx, allEffects } from './modules/registry.js';
+
+const $ = (id) => document.getElementById(id);
+const statusEl = $('status'), logEl = $('log'), resultEl = $('result');
+const qs = new URLSearchParams(location.search);
+
+// ---- module / effect selectors -------------------------------------------
+function fillModules() {
+  $('module').innerHTML = REGISTRY.map((m) => `<option value="${m.id}">${m.name}</option>`).join('');
+}
+function fillVariants(moduleId) {
+  const m = REGISTRY.find((x) => x.id === moduleId);
+  $('fx').innerHTML = m.variants.map((v) => `<option value="${v.id}">${v.name}</option>`).join('');
+}
+let currentModule = null;
+async function renderParams(moduleId) {
+  currentModule = await loadModule(moduleId);
+  const box = $('params');
+  box.innerHTML = '';
+  (currentModule.params || []).forEach((p) => {
+    const wrap = document.createElement('div');
+    wrap.style.flex = '1 1 150px';
+    const lab = document.createElement('label');
+    lab.textContent = p.label;
+    lab.htmlFor = 'param-' + p.id;
+    wrap.appendChild(lab);
+    const input = document.createElement('input');
+    input.id = 'param-' + p.id;
+    input.dataset.param = p.id;
+    if (p.type === 'checkbox') {
+      input.type = 'checkbox';
+      input.checked = !!p.value;
+      input.style.width = 'auto';
+    } else {
+      input.type = p.type || 'text';
+      if (p.min !== undefined) input.min = p.min;
+      if (p.max !== undefined) input.max = p.max;
+      if (p.step !== undefined) input.step = p.step;
+      input.value = p.value;
+    }
+    wrap.appendChild(input);
+    box.appendChild(wrap);
+  });
+}
+function readParams() {
+  const out = {};
+  document.querySelectorAll('#params [data-param]').forEach((el) => {
+    out[el.dataset.param] = el.type === 'checkbox' ? el.checked : parseFloat(el.value);
+  });
+  return out;
+}
+
+// ---- image loading --------------------------------------------------------
+async function loadImageFromUrl(url, allowProxy) {
+  if (url.startsWith('data:')) return loadImage(url);
+  const attempts = [url];
+  if (allowProxy) {
+    attempts.push('https://images.weserv.nl/?url=' + encodeURIComponent(url.replace(/^https?:\/\//, '')));
+  }
+  let last = null;
+  for (const u of attempts) {
+    try {
+      const res = await fetch(u, { mode: 'cors' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const blob = await res.blob();
+      const obj = URL.createObjectURL(blob);
+      const img = await loadImage(obj);
+      return img;
+    } catch (e) { last = e; }
+  }
+  throw new Error('That host blocks cross-origin loading (CORS). Tick the proxy box or host the image yourself.');
+}
+
+// ---- the actual render ----------------------------------------------------
+async function render(image, opts = {}) {
+  const moduleId = opts.moduleId || $('module').value;
+  const variantId = opts.variantId || $('fx').value;
+  const maxKb = (opts.maxKb ?? parseFloat($('maxkb').value)) || 250;
+  const prefer = opts.prefer || $('prefer').value;
+  const params = { ...readParams(), ...(opts.params || {}) };
+
+  resultEl.style.display = 'none';
+  logEl.textContent = '';
+  statusEl.textContent = 'loading module...';
+  const mod = await loadModule(moduleId);
+
+  statusEl.textContent = 'building frames...';
+  const { frames, delays } = await mod.build(image, {
+    size: mod.nativeSize, variant: variantId, params,
+    onProgress: (done, total) => { statusEl.textContent = `building frames... ${done}/${total}`; },
+  });
+  await new Promise((r) => setTimeout(r, 20));
+
+  statusEl.textContent = `encoding ${frames.length} frames under ${maxKb} KB...`;
+  const lossy = opts.lossy ?? (qs.get('lossy') ? parseFloat(qs.get('lossy')) : null);
+  const out = await fitToBudget(frames, delays, {
+    maxKb, prefer, maxSize: mod.maxSize, upscale: mod.upscale !== false, smooth: !mod.pixelArt,
+    gifsicle: opts.gifsicle ?? $('gifsicle').checked,
+    lossyLevels: lossy ? [0, lossy] : [0, 30, 80],
+    onTry: ({ size, colors, drop, kb, lossy: ly, probe }) => {
+      if (!probe) logEl.textContent += `${size}px · ${colors} colors · every ${drop} frame` +
+        `${ly ? ` · lossy ${ly}` : ''} → ${kb.toFixed(1)} KB\n`;
+      logEl.scrollTop = logEl.scrollHeight;
+      statusEl.textContent = `trying ${size}px / ${colors} colors${ly ? ` / lossy ${ly}` : ''}...`;
+    },
+  });
+  if (!out) { statusEl.textContent = 'could not fit the budget.'; return null; }
+
+  const blob = toBlob(out.bytes);
+  const url = URL.createObjectURL(blob);
+  $('output').src = url;
+  $('dl').href = url;
+  $('dl').download = `programa-${variantId}-${Date.now()}.gif`;
+  $('meta').innerHTML =
+    `<b>${out.kb.toFixed(1)} KB</b> · ${out.size}×${out.size}px · ${out.colors} colors · ` +
+    `${out.drop > 1 ? `every ${out.drop} frames` : 'all frames'}(${frames.length}${out.drop > 1 ? '/' + Math.ceil(frames.length / out.drop) : ''})` +
+    `${out.lossy ? ` · gifsicle --lossy=${out.lossy}` : ''}` +
+    `${out.fitted ? '' : ' · over budget (smallest possible)'}`;
+  resultEl.style.display = 'block';
+  statusEl.textContent = '';
+  return { blob, bytes: out.bytes, url, size: out.size, colors: out.colors, drop: out.drop, kb: out.kb };
+}
+
+// ---- UI wiring ------------------------------------------------------------
+fillModules();
+fillVariants(REGISTRY[0].id);
+renderParams(REGISTRY[0].id);
+$('module').addEventListener('change', async (e) => {
+  fillVariants(e.target.value);
+  await renderParams(e.target.value);
+});
+
+$('upload').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onloadend = async () => {
+    try { await render(await loadImage(reader.result)); }
+    catch (err) { statusEl.textContent = 'oh no! ' + err.message; }
+  };
+  reader.readAsDataURL(file);
+});
+
+$('urlGo').addEventListener('click', async () => {
+  const url = $('url').value.trim();
+  if (!url) return;
+  try {
+    statusEl.textContent = 'fetching image...';
+    const img = await loadImageFromUrl(url, $('proxy').checked);
+    await render(img);
+  } catch (err) { statusEl.textContent = 'oh no! ' + err.message; }
+});
+
+// ---- URL API: programa.html?url=<encoded>&fx=jet --------------------------
+async function bootFromUrl() {
+  const url = qs.get('url');
+  if (!url) return;
+
+  // effect: ?fx=jet  or  a bare key like  &jet
+  let fxId = qs.get('fx');
+  if (!fxId) {
+    for (const [k, v] of qs.entries()) {
+      if (k === 'url' || v !== '') continue;
+      if (resolveFx(k)) { fxId = k; break; }
+    }
+  }
+  const resolved = resolveFx(fxId) || resolveFx(REGISTRY[0].variants[0].id);
+
+  if (qs.has('raw')) document.body.classList.add('raw');
+  if (qs.get('maxkb')) $('maxkb').value = qs.get('maxkb');
+  if (qs.get('prefer')) $('prefer').value = qs.get('prefer');
+  if (qs.has('gifsicle')) $('gifsicle').checked = qs.get('gifsicle') !== '0';
+
+  // select the module/variant in the UI so the controls match the URL
+  $('module').value = resolved.moduleId;
+  fillVariants(resolved.moduleId);
+  await renderParams(resolved.moduleId);
+  $('fx').value = resolved.variantId;
+
+  // module params can come from the URL too (squish=1.5, flip=1, ...)
+  const params = {};
+  (currentModule.params || []).forEach((p) => {
+    if (qs.has(p.id)) {
+      params[p.id] = p.type === 'checkbox' ? (qs.get(p.id) !== '0' && qs.get(p.id) !== 'false')
+                                           : parseFloat(qs.get(p.id));
+      const el = document.getElementById('param-' + p.id);
+      if (el) { if (el.type === 'checkbox') el.checked = !!params[p.id]; else el.value = params[p.id]; }
+    }
+  });
+
+  try {
+    statusEl.textContent = 'fetching image...';
+    const image = await loadImageFromUrl(url, qs.has('proxy'));
+    const res = await render(image, {
+      moduleId: resolved.moduleId, variantId: resolved.variantId, params,
+      maxKb: qs.get('maxkb') ? parseFloat(qs.get('maxkb')) : undefined,
+      prefer: qs.get('prefer') || undefined,
+      gifsicle: qs.has('gifsicle'),
+      lossy: qs.get('lossy') ? parseFloat(qs.get('lossy')) : null,
+    });
+    if (!res) return;
+    if (qs.has('download')) $('dl').click();
+    if (qs.has('post')) {
+      const dataUrl = await toDataURL(res.bytes);
+      const msg = { type: 'programa:result', dataUrl, bytes: res.bytes.length,
+                    size: res.size, colors: res.colors, drop: res.drop, fx: resolved.variantId };
+      try { window.opener && window.opener.postMessage(msg, '*'); } catch (e) {}
+      try { window.parent !== window && window.parent.postMessage(msg, '*'); } catch (e) {}
+    }
+  } catch (err) {
+    statusEl.textContent = 'oh no! ' + err.message;
+  }
+}
+
+// programmatic API, in case you embed this page
+window.Programa = { render, loadImageFromUrl, loadModule, allEffects, resolveFx, toDataURL };
+bootFromUrl();
+</script>
+</body>
+</html>
