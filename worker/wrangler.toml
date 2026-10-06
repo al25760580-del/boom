@@ -25,8 +25,12 @@ UPLOAD_KEY = ""
 # Set it as a secret instead of here:  npx wrangler secret put DISCORD_TOKEN
 # DISCORD_TOKEN = ""
 
-# Headless Chromium, used only by /render and /render.gif (server-side renders
-# for bots). Free plan: 10 browser minutes a day, one new browser every 20s,
-# 60s per session. Every other endpoint never touches it.
-[browser]
-binding = "BROWSER"
+# Headless Chromium, used ONLY by /render and /render.gif (server-side renders
+# for bots). It is commented out because provisioning it broke Workers Builds on
+# this account; without it those two endpoints answer 501 and everything else
+# works normally. To try it, uncomment these three lines and deploy:
+#
+# [browser]
+# binding = "BROWSER"
+#
+# Free plan: 10 browser minutes a day, one new browser every 20s, 60s per session.
