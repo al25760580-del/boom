@@ -1,0 +1,22 @@
+name = "boom-embed"
+main = "src/index.js"
+compatibility_date = "2026-10-06"
+
+# Where the uploaded GIFs live. R2 free tier: 10 GB, 1M writes and 10M reads a
+# month, no egress fees — that is tens of thousands of 250 KB GIFs.
+[[r2_buckets]]
+binding = "GIFS"
+bucket_name = "boom-gifs"
+
+[vars]
+# Optional: when set, POST /g must send this in an "x-boom-key" header, so
+# nobody else can fill your bucket.
+UPLOAD_KEY = ""
+
+# Needed for /avatar/<discord id>.png. A bot token from
+# https://discord.com/developers/applications -> your app -> Bot -> Reset Token.
+# Set it as a secret instead of here:  npx wrangler secret put DISCORD_TOKEN
+# DISCORD_TOKEN = ""
+
+# No browser rendering, no Browser Run: the GIF is made in the visitor's browser
+# and only stored here. Nothing in this worker encodes anything.

@@ -1,0 +1,14 @@
+{
+  "name": "boom-embed",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "stores browser-rendered GIFs in R2 and serves them at embeddable .gif URLs",
+  "scripts": {
+    "dev": "wrangler dev --remote",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.147.0"
+  }
+}

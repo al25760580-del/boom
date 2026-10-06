@@ -30,6 +30,7 @@ programa.html?url=<url-encoded image url>&fx=jet
 | parameter | meaning |
 |---|---|
 | `url` | URL-encoded image URL (a `data:` URL works too) |
+| `discord` | a Discord user ID — their avatar is used as the image (needs the worker, see [Embeds](#embeds)) |
 | `fx` | effect id: any variant (`jet`, `nuke`, `airstrikes`, `petpet`, …) or a module id |
 | `maxkb` | size budget in KB (default 250) |
 | `prefer` | `balanced` (default) / `smooth` / `sharp` |
@@ -40,8 +41,34 @@ programa.html?url=<url-encoded image url>&fx=jet
 | `gifsicle=1` | post-process with gifsicle-WASM (`-O3 --lossy`): smaller file or more resolution |
 | `lossy=N` | cap the lossy level used by gifsicle (30 = mild, 80 = aggressive, default: try both) |
 | `proxy=1` | allow a public CORS proxy when the image host blocks direct loading |
+| `share=1` | upload the result to the worker and leave the embed link in the status line |
+| `render=<url>` | worker URL for this link only, instead of the `RENDER_BASE` baked into the page |
 
 A bare effect name also works: `programa.html?url=<...>&jet`.
+
+## Embeds
+
+A crawler never runs JavaScript, and GitHub Pages serves the same HTML for
+every query string, so a link to this page can never embed the result.
+
+The fix is a ~150 line Cloudflare Worker in [`worker/`](worker/README.md) that
+**renders nothing**: the GIF is made in the browser exactly as always, then
+uploaded with `POST /g` and served back from
+`https://<worker>/g/<id>.gif` — a URL that ends in `.gif` and answers
+`image/gif`, which is all Discord needs to embed it and play the animation.
+Storage is R2 (10 GB free), so there are no browser minutes and no per-render
+cost.
+
+```bash
+cd worker && npm install && npx wrangler login
+npx wrangler r2 bucket create boom-gifs
+npx wrangler deploy          # then put the URL in RENDER_BASE in programa.html
+```
+
+In the app, **upload + copy embed link** does the whole thing. `/view?id=<id>`
+is a card (`og:image` → the GIF) and `/g/<id>.gif` is the bare animation.
+With `DISCORD_TOKEN` set as a secret, `GET /avatar/<user id>.png` also resolves
+Discord avatars, which is what `?discord=<id>` uses.
 
 Examples:
 

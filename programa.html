@@ -72,6 +72,17 @@
     </div>
   </div>
 
+  <div class="chrome" style="margin-top:.75rem">
+    <label for="discord">...or a Discord user ID (uses their avatar)</label>
+    <div class="row">
+      <div style="flex:3 1 260px"><input type="text" id="discord" inputmode="numeric"
+        placeholder="1385341957500567574 — Discord: right-click a user → Copy User ID"></div>
+      <div style="flex:0 0 auto;display:flex;align-items:flex-end">
+        <span class="btn" id="discordGo" style="cursor:pointer">load avatar</span>
+      </div>
+    </div>
+  </div>
+
   <div class="row chrome">
     <div>
       <label for="module">module</label>
@@ -109,6 +120,7 @@
     <img id="output" alt="result">
     <div id="meta" class="chrome"></div>
     <a class="dl chrome" id="dl" download="programa.gif">download GIF</a>
+    <a class="dl chrome" id="embed" href="#">upload + copy embed link</a>
   </div>
 </div>
 
@@ -125,6 +137,7 @@ import { REGISTRY, loadModule, resolveFx, allEffects } from './modules/registry.
 const $ = (id) => document.getElementById(id);
 const statusEl = $('status'), logEl = $('log'), resultEl = $('result');
 const qs = new URLSearchParams(location.search);
+let lastResult = null;      // kept for "upload + copy embed link"
 
 // ---- module / effect selectors -------------------------------------------
 function fillModules() {
@@ -240,7 +253,18 @@ async function render(image, opts = {}) {
     `${out.fitted ? '' : ' · over budget (smallest possible)'}`;
   resultEl.style.display = 'block';
   statusEl.textContent = '';
-  return { blob, bytes: out.bytes, url, size: out.size, colors: out.colors, drop: out.drop, kb: out.kb };
+
+  const info = { size: out.size, colors: out.colors, drop: out.drop, kb: out.kb,
+                 frames: frames.length, fx: variantId, module: moduleId, lossy: out.lossy || 0 };
+  // Published for the render worker (worker/): it opens this page in headless
+  // Chromium and reads the finished GIF from here instead of scraping the DOM.
+  // The data URL is only built when someone asked for it with ?embed=1.
+  window.__PROGRAMA_RESULT__ = { ...info, bytes: out.bytes.length, ready: true, dataUrl: null };
+  if (qs.has('embed') || qs.has('post')) {
+    window.__PROGRAMA_RESULT__.dataUrl = await toDataURL(out.bytes);
+  }
+  lastResult = { bytes: out.bytes, ...info };
+  return { blob, bytes: out.bytes, url, ...info };
 }
 
 // ---- UI wiring ------------------------------------------------------------
@@ -276,7 +300,9 @@ $('urlGo').addEventListener('click', async () => {
 // ---- URL API: programa.html?url=<encoded>&fx=jet --------------------------
 async function bootFromUrl() {
   const url = qs.get('url');
-  if (!url) return;
+  const discordId = qs.get('discord');
+  if (!url && !discordId) return;
+  if (discordId) $('discord').value = discordId;
 
   // effect: ?fx=jet  or  a bare key like  &jet
   let fxId = qs.get('fx');
@@ -311,8 +337,9 @@ async function bootFromUrl() {
   });
 
   try {
-    statusEl.textContent = 'fetching image...';
-    const image = await loadImageFromUrl(url, qs.has('proxy'));
+    statusEl.textContent = discordId ? 'looking up that Discord user...' : 'fetching image...';
+    const image = discordId ? await loadDiscordAvatar(discordId)
+                            : await loadImageFromUrl(url, qs.has('proxy'));
     const res = await render(image, {
       moduleId: resolved.moduleId, variantId: resolved.variantId, params,
       maxKb: qs.get('maxkb') ? parseFloat(qs.get('maxkb')) : undefined,
@@ -321,6 +348,16 @@ async function bootFromUrl() {
       lossy: qs.get('lossy') ? parseFloat(qs.get('lossy')) : null,
     });
     if (!res) return;
+    if (qs.has('share')) {                     // render -> upload -> hand back the link
+      try {
+        statusEl.textContent = 'uploading...';
+        const link = await shareResult(res);
+        statusEl.textContent = 'embed link: ' + link;
+        window.__PROGRAMA_EMBED__ = link;
+      } catch (err) {
+        statusEl.textContent = 'upload failed: ' + err.message;
+      }
+    }
     if (qs.has('download')) $('dl').click();
     if (qs.has('post')) {
       const dataUrl = await toDataURL(res.bytes);
@@ -334,8 +371,91 @@ async function bootFromUrl() {
   }
 }
 
+// ---- embeds: the browser renders, the worker only stores ------------------
+// A crawler never runs this script and GitHub Pages serves the same HTML for
+// every query string, so a link to this page can never embed the result. The
+// fix is not to render on a server: it is to upload the GIF this browser just
+// made, and share the URL the worker gives back. It ends in .gif, so Discord
+// embeds it and plays the animation. See worker/README.md.
+const RENDER_BASE = '';   // e.g. 'https://boom-embed.<your-subdomain>.workers.dev'
+const UPLOAD_KEY = '';    // only if you set UPLOAD_KEY in wrangler.toml
+// ?render=<worker url> overrides RENDER_BASE, which is handy while testing.
+const renderBase = () => qs.get('render') || RENDER_BASE;
+
+// POST the finished bytes, get back { id, view, ... }
+async function shareResult(res) {
+  const q = new URLSearchParams({
+    fx: res.fx, size: res.size, kb: res.kb.toFixed(1), frames: res.frames,
+  });
+  const headers = { 'content-type': 'image/gif' };
+  if (UPLOAD_KEY) headers['x-boom-key'] = UPLOAD_KEY;
+  const r = await fetch(`${renderBase()}/g?${q}`, {
+    method: 'POST', headers, body: res.bytes,
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || `upload failed (HTTP ${r.status})`);
+  return new URL(data.view, renderBase()).toString();
+}
+
+$('embed').addEventListener('click', async (e) => {
+  e.preventDefault();
+  if (!renderBase()) {
+    statusEl.textContent = 'set RENDER_BASE in programa.html to your worker first — see worker/README.md';
+    return;
+  }
+  if (!lastResult) { statusEl.textContent = 'render something first.'; return; }
+  try {
+    statusEl.textContent = 'uploading...';
+    const link = await shareResult(lastResult);
+    try {
+      await navigator.clipboard.writeText(link);
+      statusEl.textContent = 'uploaded — embed link copied';
+    } catch (err) {
+      statusEl.textContent = 'uploaded: ' + link;
+    }
+  } catch (err) {
+    statusEl.textContent = 'upload failed: ' + err.message;
+  }
+});
+
+// ---- Discord avatars ------------------------------------------------------
+// In Discord: right-click a user -> Copy User ID, paste it here. Discord only
+// serves an avatar if you know its hash, and the hash comes from an API that
+// needs a token and blocks browsers, so the worker does the lookup.
+function discordAvatarUrl(id) {
+  const clean = String(id).trim();
+  if (!/^\d{17,20}$/.test(clean)) {
+    throw new Error('a Discord user ID is 17-20 digits (Discord: right-click a user -> Copy User ID)');
+  }
+  if (!renderBase()) throw new Error('set RENDER_BASE in programa.html first — see worker/README.md');
+  return `${renderBase()}/avatar/${clean}.png?size=256`;
+}
+
+// a normal fetch first, so the worker's real error (404, no token) reaches you
+async function loadDiscordAvatar(id) {
+  const res = await fetch(discordAvatarUrl(id), { mode: 'cors' });
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`;
+    try { msg = (await res.json()).error || msg; } catch (err) { /* not json */ }
+    throw new Error(msg);
+  }
+  return loadImage(URL.createObjectURL(await res.blob()));
+}
+
+$('discordGo').addEventListener('click', async () => {
+  const id = $('discord').value.trim();
+  if (!id) return;
+  try {
+    statusEl.textContent = 'looking up that Discord user...';
+    await render(await loadDiscordAvatar(id));
+  } catch (err) {
+    statusEl.textContent = 'oh no! ' + err.message;
+  }
+});
+
 // programmatic API, in case you embed this page
-window.Programa = { render, loadImageFromUrl, loadModule, allEffects, resolveFx, toDataURL };
+window.Programa = { render, loadImageFromUrl, loadModule, allEffects, resolveFx,
+                    toDataURL, shareResult, discordAvatarUrl };
 bootFromUrl();
 </script>
 </body>
