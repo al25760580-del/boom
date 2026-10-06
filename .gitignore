@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+resultados/
+*.tmp.gif
+.DS_Store
