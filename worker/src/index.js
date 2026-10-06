@@ -309,13 +309,28 @@ async function renderInBrowser(params, env) {
   try {
     const tab = await browser.newPage();
     await tab.setViewport({ width: 900, height: 900 });
+    // keep whatever the page complains about, so a timeout says why
+    const noise = [];
+    tab.on('console', (m) => { if (m.type() === 'error') noise.push(m.text().slice(0, 160)); });
+    tab.on('pageerror', (e) => noise.push(String(e).slice(0, 160)));
+    tab.on('requestfailed', (r) => noise.push(`failed ${r.url().slice(0, 80)} ${r.failure()?.errorText || ''}`));
+
     await tab.goto(page.toString(), { waitUntil: 'networkidle2', timeout: TIMEOUT });
 
-    const result = await tab.waitForFunction(
-      () => (window.__PROGRAMA_RESULT__ && window.__PROGRAMA_RESULT__.ready
-        ? window.__PROGRAMA_RESULT__ : false),
-      { timeout: TIMEOUT, polling: 300 },
-    ).then((handle) => handle.jsonValue());
+    let handle;
+    try {
+      handle = await tab.waitForFunction(
+        () => (window.__PROGRAMA_RESULT__ && window.__PROGRAMA_RESULT__.ready
+          ? window.__PROGRAMA_RESULT__ : false),
+        { timeout: TIMEOUT, polling: 300 },
+      );
+    } catch (err) {
+      const status = await tab.evaluate(
+        () => (document.getElementById('status') || {}).textContent || '').catch(() => '');
+      throw new Error(`page never finished (status: ${JSON.stringify(status || 'empty')}` +
+        `${noise.length ? ` · ${noise.slice(0, 3).join(' | ')}` : ''})`);
+    }
+    const result = await handle.jsonValue();
 
     if (!result || !result.dataUrl) throw new Error('the page never finished a GIF');
 
