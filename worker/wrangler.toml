@@ -26,11 +26,8 @@ UPLOAD_KEY = ""
 # DISCORD_TOKEN = ""
 
 # Headless Chromium, used ONLY by /render and /render.gif (server-side renders
-# for bots). It is commented out because provisioning it broke Workers Builds on
-# this account; without it those two endpoints answer 501 and everything else
-# works normally. To try it, uncomment these three lines and deploy:
-#
-# [browser]
-# binding = "BROWSER"
-#
-# Free plan: 10 browser minutes a day, one new browser every 20s, 60s per session.
+# for bots). Every other endpoint never touches it.
+# Free plan: 10 browser minutes a day, one new browser every 20s, 60s per
+# session. Comment this out if you would rather those two endpoints answer 501.
+[browser]
+binding = "BROWSER"
