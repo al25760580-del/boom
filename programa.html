@@ -120,7 +120,7 @@
     <img id="output" alt="result">
     <div id="meta" class="chrome"></div>
     <a class="dl chrome" id="dl" download="programa.gif">download GIF</a>
-    <a class="dl chrome" id="embed" href="#">upload + copy embed link</a>
+    <a class="dl chrome" id="embed" href="#">upload + copy GIF URL</a>
 
     <div id="share" class="chrome" style="display:none;margin-top:1rem">
       <div class="row" style="gap:.5rem;align-items:flex-end">
@@ -472,10 +472,10 @@ $('embed').addEventListener('click', async (e) => {
     const data = await shareResult(lastResult);
     showShare(data);
     try {
-      await navigator.clipboard.writeText(data.share);
-      statusEl.textContent = 'uploaded — card URL copied';
+      await navigator.clipboard.writeText(data.url);      // the direct .gif
+      statusEl.textContent = 'uploaded — GIF URL copied';
     } catch (err) {
-      statusEl.textContent = 'uploaded: ' + data.share;
+      statusEl.textContent = 'uploaded: ' + data.url;
     }
   } catch (err) {
     statusEl.textContent = 'upload failed: ' + err.message;
