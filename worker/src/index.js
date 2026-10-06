@@ -335,7 +335,8 @@ async function renderInBrowser(params, env) {
     if (!result || !result.dataUrl) throw new Error('the page never finished a GIF');
 
     const bytes = base64ToBytes(result.dataUrl.slice(result.dataUrl.indexOf(',') + 1));
-    const meta = { ...result, dataUrl: undefined };
+    const meta = { ...result };
+    delete meta.dataUrl;          // R2 metadata is strings; don't store "undefined"
     return { bytes, meta };
   } finally {
     await browser.close();                      // browser time is billed until it closes

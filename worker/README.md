@@ -96,21 +96,21 @@ cmp resultados/input-nuke.gif /tmp/back.gif && echo "byte identical"
 
 Then paste `$WORKER/view?id=$ID` into Discord.
 
-## For bots: `/patpat @user`
+## For bots: `/petpet @user`
 
 Two endpoints take the same parameters as the page and do the work on the
 server, so a bot does not need a browser of its own:
 
 ```
-GET /render.gif?url=<image>&fx=petpat     →  the GIF bytes
-GET /render?url=<image>&fx=petpat         →  { url, view, bytes, size, kb, … }
-GET /render?discord=<user id>&fx=petpat   →  same, with that user's avatar
+GET /render.gif?url=<image>&fx=petpet     →  the GIF bytes
+GET /render?url=<image>&fx=petpet         →  { url, view, bytes, size, kb, … }
+GET /render?discord=<user id>&fx=petpet   →  same, with that user's avatar
 ```
 
 ```js
 // from a Discord slash command, ~4 lines:
 const r = await fetch(`https://boom.milanesa2con2limon.workers.dev/render?` +
-  new URLSearchParams({ url: member.displayAvatarURL({ size: 256 }), fx: 'petpat' }));
+  new URLSearchParams({ url: member.displayAvatarURL({ size: 256 }), fx: 'petpet' }));
 const { url } = await r.json();
 await interaction.reply(url);        // Discord embeds and animates it
 ```
