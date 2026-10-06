@@ -25,5 +25,8 @@ UPLOAD_KEY = ""
 # Set it as a secret instead of here:  npx wrangler secret put DISCORD_TOKEN
 # DISCORD_TOKEN = ""
 
-# No browser rendering, no Browser Run: the GIF is made in the visitor's browser
-# and only stored here. Nothing in this worker encodes anything.
+# Headless Chromium, used only by /render and /render.gif (server-side renders
+# for bots). Free plan: 10 browser minutes a day, one new browser every 20s,
+# 60s per session. Every other endpoint never touches it.
+[browser]
+binding = "BROWSER"

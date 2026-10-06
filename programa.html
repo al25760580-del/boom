@@ -121,6 +121,29 @@
     <div id="meta" class="chrome"></div>
     <a class="dl chrome" id="dl" download="programa.gif">download GIF</a>
     <a class="dl chrome" id="embed" href="#">upload + copy embed link</a>
+
+    <div id="share" class="chrome" style="display:none;margin-top:1rem">
+      <div class="row" style="gap:.5rem;align-items:flex-end">
+        <div style="flex:3 1 240px">
+          <label for="gifUrl">direct GIF URL (same parameters always give the same URL)</label>
+          <input type="text" id="gifUrl" readonly>
+        </div>
+        <div style="flex:0 0 auto"><span class="btn" id="copyGif" style="cursor:pointer">copy</span></div>
+      </div>
+      <div class="row" style="gap:.5rem;align-items:flex-end;margin-top:.5rem">
+        <div style="flex:3 1 240px">
+          <label for="viewUrl">card URL (title + description + image)</label>
+          <input type="text" id="viewUrl" readonly>
+        </div>
+        <div style="flex:0 0 auto"><span class="btn" id="copyView" style="cursor:pointer">copy</span></div>
+      </div>
+      <div style="margin-top:.75rem">
+        <div style="opacity:.6;font-size:12px;margin-bottom:.35rem">how it looks in Discord</div>
+        <iframe id="embedPreview" title="embed preview"
+          style="width:100%;max-width:460px;height:440px;border:1px solid #3a3330;
+                 border-radius:6px;background:#313338"></iframe>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -348,12 +371,13 @@ async function bootFromUrl() {
       lossy: qs.get('lossy') ? parseFloat(qs.get('lossy')) : null,
     });
     if (!res) return;
-    if (qs.has('share')) {                     // render -> upload -> hand back the link
+    if (qs.has('share')) {                     // render -> upload -> hand back the URL
       try {
         statusEl.textContent = 'uploading...';
-        const link = await shareResult(res);
-        statusEl.textContent = 'embed link: ' + link;
-        window.__PROGRAMA_EMBED__ = link;
+        const data = await shareResult(res);
+        showShare(data);
+        statusEl.textContent = 'uploaded: ' + data.url;
+        window.__PROGRAMA_EMBED__ = data;      // { id, url, share, ... }
       } catch (err) {
         statusEl.textContent = 'upload failed: ' + err.message;
       }
@@ -382,11 +406,27 @@ const UPLOAD_KEY = '';    // only if you set UPLOAD_KEY in wrangler.toml
 // ?render=<worker url> overrides RENDER_BASE, which is handy while testing.
 const renderBase = () => qs.get('render') || RENDER_BASE;
 
-// POST the finished bytes, get back { id, view, ... }
+// Where the source image came from, when we know it. The worker hashes it
+// together with the settings, so the same request always lands on the same
+// URL: a bot can build https://<worker>/g/<hash>.gif without rendering twice.
+function sourceUrl() {
+  const typed = $('url').value.trim();
+  if (qs.get('url')) return qs.get('url');
+  if (qs.get('discord')) return `${renderBase()}/avatar/${qs.get('discord')}.png?size=256`;
+  return /^https?:\/\//i.test(typed) ? typed : '';
+}
+
+// POST the finished bytes, get back { id, url, share, ... }
 async function shareResult(res) {
   const q = new URLSearchParams({
     fx: res.fx, size: res.size, kb: res.kb.toFixed(1), frames: res.frames,
+    maxkb: $('maxkb').value, prefer: $('prefer').value,
+    gifsicle: $('gifsicle').checked ? '1' : '0',
   });
+  if (qs.get('lossy')) q.set('lossy', qs.get('lossy'));
+  const src = sourceUrl();
+  if (src) q.set('src', src);                    // makes the id deterministic
+
   const headers = { 'content-type': 'image/gif' };
   if (UPLOAD_KEY) headers['x-boom-key'] = UPLOAD_KEY;
   const r = await fetch(`${renderBase()}/g?${q}`, {
@@ -394,7 +434,30 @@ async function shareResult(res) {
   });
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(data.error || `upload failed (HTTP ${r.status})`);
-  return new URL(data.view, renderBase()).toString();
+
+  const base = renderBase();
+  data.url = data.url || new URL(data.gif, base).toString();
+  data.share = data.share || new URL(data.view, base).toString();
+  return data;
+}
+
+// show the URLs and a preview of the embed, exactly as Discord will render it
+function showShare(data) {
+  $('gifUrl').value = data.url;
+  $('viewUrl').value = data.share;
+  $('embedPreview').src = data.share + '&preview=1';
+  $('share').style.display = 'block';
+}
+
+async function copyInto(id) {
+  const value = $(id).value;
+  try {
+    await navigator.clipboard.writeText(value);
+    return 'copied';
+  } catch (err) {
+    $(id).select();
+    return 'press Ctrl+C to copy';
+  }
 }
 
 $('embed').addEventListener('click', async (e) => {
@@ -406,16 +469,24 @@ $('embed').addEventListener('click', async (e) => {
   if (!lastResult) { statusEl.textContent = 'render something first.'; return; }
   try {
     statusEl.textContent = 'uploading...';
-    const link = await shareResult(lastResult);
+    const data = await shareResult(lastResult);
+    showShare(data);
     try {
-      await navigator.clipboard.writeText(link);
-      statusEl.textContent = 'uploaded — embed link copied';
+      await navigator.clipboard.writeText(data.share);
+      statusEl.textContent = 'uploaded — card URL copied';
     } catch (err) {
-      statusEl.textContent = 'uploaded: ' + link;
+      statusEl.textContent = 'uploaded: ' + data.share;
     }
   } catch (err) {
     statusEl.textContent = 'upload failed: ' + err.message;
   }
+});
+
+$('copyGif').addEventListener('click', async () => {
+  statusEl.textContent = await copyInto('gifUrl');
+});
+$('copyView').addEventListener('click', async () => {
+  statusEl.textContent = await copyInto('viewUrl');
 });
 
 // ---- Discord avatars ------------------------------------------------------

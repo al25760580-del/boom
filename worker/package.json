@@ -8,6 +8,9 @@
     "dev": "wrangler dev --remote",
     "deploy": "wrangler deploy"
   },
+  "dependencies": {
+    "@cloudflare/puppeteer": "^1.4.0"
+  },
   "devDependencies": {
     "wrangler": "^4.147.0"
   }

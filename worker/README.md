@@ -96,6 +96,55 @@ cmp resultados/input-nuke.gif /tmp/back.gif && echo "byte identical"
 
 Then paste `$WORKER/view?id=$ID` into Discord.
 
+## For bots: `/patpat @user`
+
+Two endpoints take the same parameters as the page and do the work on the
+server, so a bot does not need a browser of its own:
+
+```
+GET /render.gif?url=<image>&fx=petpat     →  the GIF bytes
+GET /render?url=<image>&fx=petpat         →  { url, view, bytes, size, kb, … }
+GET /render?discord=<user id>&fx=petpat   →  same, with that user's avatar
+```
+
+```js
+// from a Discord slash command, ~4 lines:
+const r = await fetch(`https://boom.milanesa2con2limon.workers.dev/render?` +
+  new URLSearchParams({ url: member.displayAvatarURL({ size: 256 }), fx: 'petpat' }));
+const { url } = await r.json();
+await interaction.reply(url);        // Discord embeds and animates it
+```
+
+### URLs you can build without asking
+
+An id is `sha256` of the inputs, so **the same parameters always produce the
+same URL** — a bot can work it out itself and skip the round trip:
+
+```js
+const id = [...new Uint8Array(await crypto.subtle.digest('SHA-256',
+  new TextEncoder().encode([src, fx, maxkb, prefer, gifsicle, lossy].join('|'))))]
+  .map((b) => b.toString(16).padStart(2, '0')).join('').slice(0, 32);
+
+const url = `https://boom.milanesa2con2limon.workers.dev/g/${id}.gif`;
+```
+
+Use the defaults when you omit a field: `maxkb=250`, `prefer=balanced`,
+`gifsicle=0`, `lossy=` (empty). If that URL 404s, nobody has rendered that
+combination yet — call `/render` once, and it will exist forever after.
+
+### What `/render` costs
+
+Workers Free gives **10 ms of CPU per request**, and encoding a GIF takes
+hundreds of milliseconds, so this cannot run as plain Worker code. `/render`
+opens the app in headless Chromium (Browser Run) instead, which spends *browser
+minutes* rather than Worker CPU: **10 minutes a day** on the free plan, roughly
+120 renders, one new browser every 20 seconds. Results are stored in R2 under
+the hash above, so a repeated request never touches the browser again.
+
+If you outgrow it, the options are Workers Paid ($5/month, render in pure JS
+with no browser at all) or rendering in the bot process itself with
+`@napi-rs/canvas`.
+
 ## Uploads are open on purpose
 
 `UPLOAD_KEY` is empty, so anyone can `POST /g`. That is deliberate: it is a

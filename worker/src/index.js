@@ -18,6 +18,7 @@
 const APP = 'https://al25760580-del.github.io/boom/programa.html';
 const MAX_BYTES = 8 * 1024 * 1024;        // refuse anything absurd
 const IMMUTABLE = 'public, max-age=31536000, immutable';
+const TIMEOUT = 45_000;                   // browser sessions die at 60s
 
 const CORS = {
   'access-control-allow-origin': '*',
@@ -50,8 +51,30 @@ export default {
       if (url.pathname.startsWith('/avatar/') && request.method === 'GET') {
         return withCors(await avatar(url, env));
       }
+      // server-side rendering, for bots: the worker opens the app in headless
+      // Chromium and hands back the GIF the browser just made
+      if (url.pathname === '/render.gif' && request.method === 'GET') {
+        const { bytes, cached } = await renderFromParams(url, env);
+        return withCors(new Response(bytes, {
+          headers: {
+            'content-type': 'image/gif',
+            'content-length': String(bytes.length),
+            'cache-control': IMMUTABLE,
+            'x-boom-cached': cached ? '1' : '0',
+          },
+        }));
+      }
+      if (url.pathname === '/render' && request.method === 'GET') {
+        const { bytes, meta, id, cached } = await renderFromParams(url, env);
+        return withCors(json({
+          url: new URL(`/g/${id}.gif`, url.origin).toString(),
+          view: new URL(`/view?id=${id}`, url.origin).toString(),
+          bytes: bytes.length, ...meta, cached,
+        }));
+      }
     } catch (err) {
-      return withCors(json({ error: err.message }, 500));
+      // keep the status the endpoint asked for (400, 404, 429, 501…)
+      return withCors(json({ error: err.message }, err.status || 500));
     }
 
     return withCors(json({ error: 'not found' }, 404));
@@ -75,7 +98,16 @@ async function upload(request, env, url) {
     return json({ error: 'that is not a GIF' }, 415);
   }
 
-  const id = newId();
+  // When the client tells us which image it used, the id is a hash of the
+  // inputs, so the same request always lands on the same URL: a bot can build
+  // https://<worker>/g/<hash>.gif itself, and a second identical render costs
+  // nothing. Local file uploads have no URL, so they get a random id.
+  const src = (url.searchParams.get('src') || '').slice(0, 512);
+  const id = src
+    ? await sha256([src, url.searchParams.get('fx'), url.searchParams.get('maxkb'),
+                    url.searchParams.get('prefer'), url.searchParams.get('gifsicle'),
+                    url.searchParams.get('lossy')].join('|'))
+    : newId();
   const meta = {
     fx: (url.searchParams.get('fx') || '').slice(0, 32),
     size: (url.searchParams.get('size') || '').slice(0, 8),
@@ -145,9 +177,15 @@ async function view(url, env) {
 <meta name="twitter:title" content="${esc(title)}">
 <meta name="twitter:description" content="${esc(desc)}">
 <meta name="twitter:image" content="${esc(gifUrl)}">
-<meta http-equiv="refresh" content="0; url=${esc(APP)}">
-</head><body style="background:#12100f;color:#f2e9e1;font:15px system-ui;margin:0;padding:3rem">
-<p>opening <a style="color:#ff7a3d" href="${esc(APP)}">programa</a>…</p>
+${url.searchParams.has('preview') ? '' : `<meta http-equiv="refresh" content="0; url=${esc(APP)}">`}
+</head><body style="background:#12100f;color:#f2e9e1;font:15px system-ui;margin:0;padding:${url.searchParams.has('preview') ? '0' : '3rem'}">
+${url.searchParams.has('preview')
+  ? `<img src="${esc(gifUrl)}" alt="result" style="display:block;width:100%;max-width:480px">
+     <div style="padding:1rem">
+       <div style="color:#ff7a3d;font-weight:600">${esc(title)}</div>
+       <div style="opacity:.7;font-size:13px">${esc(desc)}</div>
+     </div>`
+  : `<p>opening <a style="color:#ff7a3d" href="${esc(APP)}">programa</a>…</p>`}
 </body></html>`;
 
   return new Response(html, {
@@ -214,6 +252,97 @@ function defaultAvatarIndex(id, discriminator) {
   return Number(BigInt(id) >> 22n) % 6;
 }
 
+// ---- server-side rendering, for bots -------------------------------------
+
+/**
+ * GET /render.gif?url=<image>&fx=petpat   →  the GIF bytes
+ * GET /render?url=<image>&fx=petpat       →  { url, view, bytes, size, kb, … }
+ *
+ * A Worker on the free plan only gets 10 ms of CPU per request and encoding a
+ * GIF costs hundreds, so this does not encode anything itself: it opens the app
+ * in headless Chromium (Browser Run), which spends browser minutes instead of
+ * Worker CPU, and copies out the GIF the page produces. Results are stored in
+ * R2 under a hash of the parameters, so the same request twice costs one render.
+ */
+async function renderFromParams(url, env) {
+  const src = url.searchParams.get('url') || url.searchParams.get('discord');
+  if (!src) throw httpError(400, 'url is required (or discord=<user id>)');
+
+  let imageUrl = src;
+  if (/^\d{17,20}$/.test(src)) {
+    imageUrl = new URL(`/avatar/${src}.png?size=256`, url.origin).toString();
+  } else if (!/^https?:\/\//i.test(src)) {
+    throw httpError(400, 'url must be an http(s) image URL');
+  }
+
+  const params = new URLSearchParams(url.searchParams);
+  params.delete('discord');
+  params.set('url', imageUrl);
+  if (!params.has('fx')) params.set('fx', 'petpat');
+
+  const id = await sha256(params.toString());   // same parameters, same GIF
+  const key = `${id}.gif`;
+
+  const cached = await env.GIFS.get(key);
+  if (cached) {
+    return { bytes: new Uint8Array(await cached.arrayBuffer()),
+             meta: cached.customMetadata || {}, id, cached: true };
+  }
+
+  const { bytes, meta } = await renderInBrowser(params, env);
+  await env.GIFS.put(key, bytes, {
+    httpMetadata: { contentType: 'image/gif', cacheControl: IMMUTABLE },
+    customMetadata: { ...meta, kind: 'render' },
+  });
+  return { bytes, meta, id, cached: false };
+}
+
+async function renderInBrowser(params, env) {
+  if (!env.BROWSER) {
+    throw httpError(501, 'no BROWSER binding — add [browser] binding = "BROWSER" to wrangler.toml');
+  }
+  const page = new URL(APP);
+  params.forEach((value, name) => page.searchParams.set(name, value));
+  page.searchParams.set('embed', '1');          // ask the app for a data URL
+
+  const browser = await launch(env);
+  try {
+    const tab = await browser.newPage();
+    await tab.setViewport({ width: 900, height: 900 });
+    await tab.goto(page.toString(), { waitUntil: 'networkidle2', timeout: TIMEOUT });
+
+    const result = await tab.waitForFunction(
+      () => (window.__PROGRAMA_RESULT__ && window.__PROGRAMA_RESULT__.ready
+        ? window.__PROGRAMA_RESULT__ : false),
+      { timeout: TIMEOUT, polling: 300 },
+    ).then((handle) => handle.jsonValue());
+
+    if (!result || !result.dataUrl) throw new Error('the page never finished a GIF');
+
+    const bytes = base64ToBytes(result.dataUrl.slice(result.dataUrl.indexOf(',') + 1));
+    const meta = { ...result, dataUrl: undefined };
+    return { bytes, meta };
+  } finally {
+    await browser.close();                      // browser time is billed until it closes
+  }
+}
+
+// puppeteer.launch() rejects with 429 when the account is out of browser time
+// (10 min/day on Free) or launching too fast (one new browser every 20s).
+async function launch(env) {
+  // Imported lazily: the upload path never touches it, so it costs nothing
+  // unless someone actually asks for a server-side render.
+  const { default: puppeteer } = await import('@cloudflare/puppeteer');
+  try {
+    return await puppeteer.launch(env.BROWSER);
+  } catch (err) {
+    if (err && err.status === 429) {
+      err.message = 'out of browser time (10 min/day on the free plan) — try again later';
+    }
+    throw err;
+  }
+}
+
 // ---- helpers --------------------------------------------------------------
 
 function newId() {
@@ -235,4 +364,23 @@ function withCors(response) {
 function esc(s) {
   return String(s).replace(/[&<>"]/g, (c) => (
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
+async function sha256(s) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
+  return [...new Uint8Array(digest)]
+    .map((b) => b.toString(16).padStart(2, '0')).join('').slice(0, 32);
+}
+
+function base64ToBytes(b64) {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+function httpError(status, message) {
+  const err = new Error(message);
+  err.status = status;
+  return err;
 }
