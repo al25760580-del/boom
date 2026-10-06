@@ -1,6 +1,12 @@
-name = "boom-embed"
+# This name must match the Worker you connected to the repository, or Workers
+# Builds fails the build with a "Failed to match Worker name" warning.
+name = "boom"
 main = "src/index.js"
 compatibility_date = "2026-10-06"
+
+# Set explicitly so the deploy does not warn about defaults.
+workers_dev = true
+preview_urls = true
 
 # Where the uploaded GIFs live. R2 free tier: 10 GB, 1M writes and 10M reads a
 # month, no egress fees — that is tens of thousands of 250 KB GIFs.
@@ -9,8 +15,9 @@ binding = "GIFS"
 bucket_name = "boom-gifs"
 
 [vars]
-# Optional: when set, POST /g must send this in an "x-boom-key" header, so
-# nobody else can fill your bucket.
+# Left empty on purpose: anyone can upload, this is a public toy. Set it to a
+# secret and the app sends it as "x-boom-key" if you ever want to lock uploads
+# down. 10 GB of R2 is ~40,000 GIFs, so abuse costs little either way.
 UPLOAD_KEY = ""
 
 # Needed for /avatar/<discord id>.png. A bot token from

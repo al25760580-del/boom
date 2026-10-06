@@ -377,7 +377,7 @@ async function bootFromUrl() {
 // fix is not to render on a server: it is to upload the GIF this browser just
 // made, and share the URL the worker gives back. It ends in .gif, so Discord
 // embeds it and plays the animation. See worker/README.md.
-const RENDER_BASE = '';   // e.g. 'https://boom-embed.<your-subdomain>.workers.dev'
+const RENDER_BASE = 'https://boom.milanesa2con2limon.workers.dev';
 const UPLOAD_KEY = '';    // only if you set UPLOAD_KEY in wrangler.toml
 // ?render=<worker url> overrides RENDER_BASE, which is handy while testing.
 const renderBase = () => qs.get('render') || RENDER_BASE;

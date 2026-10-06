@@ -62,24 +62,22 @@ Wrangler prints the URL, something like
 
 **4. Tell the app about it**
 
-Open `programa.html`, find the line
+`programa.html` already points at the deployed worker:
 
 ```js
-const RENDER_BASE = '';
+const RENDER_BASE = 'https://boom.milanesa2con2limon.workers.dev';
 ```
 
-and put your worker URL in it, with no trailing slash:
+The button in the app reads **upload + copy embed link**: it uploads the GIF,
+then copies a `/view?id=…` link you can paste straight into Discord.
 
-```js
-const RENDER_BASE = 'https://boom-embed.<your-subdomain>.workers.dev';
-```
+If you deploy your own copy, change that line to your URL (no trailing slash),
+or leave it empty and pass a worker per link with `?render=<worker url>`.
 
-Commit and push. The button in the app now reads **upload + copy embed link**:
-it uploads the GIF, then copies a `/view?id=…` link you can paste straight into
-Discord.
-
-You can also leave `RENDER_BASE` empty and pass the worker per link with
-`?render=<worker url>`, which is handy while testing.
+> **The Worker name has to match `name` in `wrangler.toml`.** Workers Builds
+> fails with `Failed to match Worker name` and tries to open a pull request
+> otherwise. If you call yours something other than `boom`, change `name` in
+> `wrangler.toml` to match it.
 
 **5. Test it**
 
@@ -97,6 +95,12 @@ cmp resultados/input-nuke.gif /tmp/back.gif && echo "byte identical"
 ```
 
 Then paste `$WORKER/view?id=$ID` into Discord.
+
+## Uploads are open on purpose
+
+`UPLOAD_KEY` is empty, so anyone can `POST /g`. That is deliberate: it is a
+toy for everyone. Storage is capped by the bucket (10 GB free ≈ 40,000 GIFs) and
+nothing else depends on it.
 
 ## Optional hardening
 
